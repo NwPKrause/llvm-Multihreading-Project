@@ -1,0 +1,34 @@
+name: Sync LLVM Main Branch
+
+on:
+  schedule:
+    - cron: '0 0,12 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout local branch
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Fast-Forward Sync with Upstream LLVM
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Add upstream LLVM repository
+          git remote add upstream https://github.com/llvm/llvm-project.git
+          git fetch upstream main
+
+          # Force a fast-forward only merge (no merge commit possible)
+          git merge --ff-only upstream/main
+
+          # Push back to your fork
+          git push origin main
