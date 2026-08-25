@@ -7,28 +7,33 @@ on:
 
 permissions:
   contents: write
-  workflows: write
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout local branch
+      - name: Checkout local main
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
-      - name: Rebase and Sync Upstream
+      - name: Fetch and Merge Upstream
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -B main origin/main
+
+          # Add upstream and fetch main
           git remote add upstream https://github.com/llvm/llvm-project.git || git remote set-url upstream https://github.com/llvm/llvm-project.git
           git fetch upstream main
-          git rebase upstream/main
-          git push --force https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git main
-          git rebase upstream/main
 
-          # Push back to origin main
-          git push --force https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git main
+          # Soft merge upstream changes without committing
+          git merge upstream/main --no-commit --no-ff --allow-unrelated-histories || true
+
+          # Restore local workflows to guarantee your sync file is never modified or deleted
+          git checkout HEAD -- .github/
+
+          # Stage, commit, and push
+          git add .github/
+          git commit -m "sync: merge upstream LLVM main preserving workflows" || echo "No new changes to commit"
+          git push origin main
