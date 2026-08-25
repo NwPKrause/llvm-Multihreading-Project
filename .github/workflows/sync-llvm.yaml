@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  workflows: write
 
 jobs:
   sync:
@@ -22,12 +23,11 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
           git checkout -B main origin/main
           git remote add upstream https://github.com/llvm/llvm-project.git || git remote set-url upstream https://github.com/llvm/llvm-project.git
           git fetch upstream main
-
-          # Rebase your local commits (including workflow file) on top of upstream main
+          git rebase upstream/main
+          git push --force https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git main
           git rebase upstream/main
 
           # Push back to origin main
