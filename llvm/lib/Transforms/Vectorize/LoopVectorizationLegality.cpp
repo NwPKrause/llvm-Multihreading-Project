@@ -462,7 +462,7 @@ int LoopVectorizationLegality::isConsecutivePtr(Type *AccessTy,
   // the symbolic strides when runtime SCEV checks are permitted.
   const auto &Strides = LAI && AllowRuntimeSCEVChecks
                             ? LAI->getSymbolicStrides()
-                            : DenseMap<Value *, const SCEV *>();
+                            : SymbolicStrideMap();
   SmallVector<const SCEVPredicate *> Predicates;
   int Stride = getPtrStride(PSE, AccessTy, Ptr, TheLoop, *DT, Strides, false,
                             AllowRuntimeSCEVChecks ? &Predicates : nullptr)
@@ -1730,6 +1730,10 @@ bool LoopVectorizationLegality::isVectorizableEarlyExitLoop() {
   bool HasSideEffects = false;
   for (auto *BB : TheLoop->blocks())
     for (auto &I : *BB) {
+      // Debug values and pseudo-probes are placeholders with side effects but
+      // no real memory dependence, and should not disqualify early exit loops.
+      if (I.isDebugOrPseudoInst())
+        continue;
       if (I.mayWriteToMemory()) {
         if (isa<StoreInst>(&I) && cast<StoreInst>(&I)->isSimple()) {
           HasSideEffects = true;
@@ -1862,6 +1866,12 @@ bool LoopVectorizationLegality::canUncountableExitConditionLoadBeMoved(
   for (auto *BB : TheLoop->blocks()) {
     for (auto &I : *BB) {
       if (&I == Load)
+        continue;
+
+      // Debug values and pseudo-probes are placeholders with no real memory
+      // access, so they cannot alias the exit condition load and do not need
+      // to be masked.
+      if (I.isDebugOrPseudoInst())
         continue;
 
       if (I.mayReadOrWriteMemory()) {
