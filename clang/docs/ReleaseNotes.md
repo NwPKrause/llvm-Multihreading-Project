@@ -171,6 +171,9 @@ features cannot lower the translation-unit ABI level;
 
 #### C++20 Feature Support
 
+- Now clang-scan-deps in P1689 format can find the dependencies described in
+  module map file. See the documents of standard C++ modules for details.
+
 #### C++17 Feature Support
 
 #### Resolutions to C++ Defect Reports
@@ -508,6 +511,7 @@ features cannot lower the translation-unit ABI level;
 - Fixed a crash when declaring a member template within a local class inside an OpenMP region. (#GH216052)
 - Fixed a bug where repeated #imports of modular headers in non-modular compilation were translated to #pragma clang module import. (#GH216924)
 - Fixed an assertion when `#pragma omp declare simd` or `#pragma omp declare variant` is followed by another OpenMP declarative directive containing a qualified identifier. (#GH217204)
+- Fixed a crash when an `asm` label names the register for a global variable of incomplete type. (#GH219746)
 
 #### Bug Fixes to Compiler Builtins
 
@@ -536,6 +540,13 @@ features cannot lower the translation-unit ABI level;
   rather than to a declarator chunk. (#GH196982, #GH111463)
 
 #### Bug Fixes to C++ Support
+
+- Fixed false-positive module ODR diagnostics when a type is found through a
+  using-declaration in one definition and directly in another. ODR hashing also
+  now distinguishes differently qualified uses of types found through
+  using-declarations. (#GH78850)
+- Fixed an assertion when diagnosing module ODR violations for enum underlying
+  types found through using-declarations with the same name but different types.
 
 - Fixed a false type mismatch when a typedef naming an anonymous enumeration
   was used through a C++20 named module and its defining header was subsequently
