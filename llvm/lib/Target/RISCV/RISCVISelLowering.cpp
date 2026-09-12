@@ -136,21 +136,9 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
     : TargetLowering(TM, STI), Subtarget(STI) {
 
   RISCVABI::ABI ABI = Subtarget.getTargetABI();
+  // Note: Hard-float ABIs that don't match the F/D extensions are already
+  // rejected/ by RISCVABI::computeTargetABI() during subtarget construction.
   assert(ABI != RISCVABI::ABI_Unknown && "Improperly initialised target ABI");
-
-  if ((ABI == RISCVABI::ABI_ILP32F || ABI == RISCVABI::ABI_LP64F) &&
-      !Subtarget.hasStdExtF()) {
-    errs() << "Hard-float 'f' ABI can't be used for a target that "
-                "doesn't support the F instruction set extension (ignoring "
-                          "target-abi)\n";
-    ABI = Subtarget.is64Bit() ? RISCVABI::ABI_LP64 : RISCVABI::ABI_ILP32;
-  } else if ((ABI == RISCVABI::ABI_ILP32D || ABI == RISCVABI::ABI_LP64D) &&
-             !Subtarget.hasStdExtD()) {
-    errs() << "Hard-float 'd' ABI can't be used for a target that "
-              "doesn't support the D instruction set extension (ignoring "
-              "target-abi)\n";
-    ABI = Subtarget.is64Bit() ? RISCVABI::ABI_LP64 : RISCVABI::ABI_ILP32;
-  }
 
   switch (ABI) {
   default:
@@ -10368,10 +10356,10 @@ static SDValue lowerSelectToBinOp(SDNode *N, SelectionDAG &DAG,
       return DAG.getNode(ISD::OR, DL, VT, Neg, DAG.getFreeze(TrueV));
     }
 
-    const bool HasCZero = VT.isScalarInteger() && Subtarget.hasCZEROLike();
+    const bool HasZicond = VT.isScalarInteger() && Subtarget.hasStdExtZicond();
 
     // (select c, 0, y) -> (c-1) & y
-    if (isNullConstant(TrueV) && (!HasCZero || isSimm12Constant(FalseV))) {
+    if (isNullConstant(TrueV) && (!HasZicond || isSimm12Constant(FalseV))) {
       SDValue Neg =
           DAG.getNode(ISD::ADD, DL, VT, CondV, DAG.getAllOnesConstant(DL, VT));
       return DAG.getNode(ISD::AND, DL, VT, Neg, DAG.getFreeze(FalseV));
@@ -10395,7 +10383,7 @@ static SDValue lowerSelectToBinOp(SDNode *N, SelectionDAG &DAG,
         }
       }
       // (select c, y, 0) -> -c & y
-      if (!HasCZero || isSimm12Constant(TrueV)) {
+      if (!HasZicond || isSimm12Constant(TrueV)) {
         SDValue Neg = DAG.getNegative(CondV, DL, VT);
         return DAG.getNode(ISD::AND, DL, VT, Neg, DAG.getFreeze(TrueV));
       }
@@ -10580,11 +10568,11 @@ SDValue RISCVTargetLowering::lowerSELECT(SDValue Op, SelectionDAG &DAG) const {
     return DAG.getBitcast(VT, ResultInt);
   }
 
-  // When Zicond or XVentanaCondOps is present, emit CZERO_EQZ and CZERO_NEZ
+  // When Zicond is present, emit CZERO_EQZ and CZERO_NEZ
   // nodes to implement the SELECT. Performing the lowering here allows for
   // greater control over when CZERO_{EQZ/NEZ} are used vs another branchless
   // sequence or RISCVISD::SELECT_CC node (branch-based select).
-  if (Subtarget.hasCZEROLike() && VT.isScalarInteger()) {
+  if (Subtarget.hasStdExtZicond() && VT.isScalarInteger()) {
 
     // (select c, t, 0) -> (czero_eqz t, c)
     if (isNullConstant(FalseV))
@@ -12545,6 +12533,47 @@ static Intrinsic::ID getRVPScalarMulPartsIntrinsic(unsigned IntNo) {
     return Intrinsic::riscv_mulsu_00;
   case Intrinsic::riscv_pmulsu_11:
     return Intrinsic::riscv_mulsu_11;
+  }
+}
+
+/// Return the accumulate form of multiply-parts intrinsic \p IntNo, or
+/// Intrinsic::not_intrinsic if there is none.
+static Intrinsic::ID getRVPMulPartsAccIntrinsic(unsigned IntNo) {
+  switch (IntNo) {
+  default:
+    return Intrinsic::not_intrinsic;
+  case Intrinsic::riscv_mul_00:
+    return Intrinsic::riscv_macc_00;
+  case Intrinsic::riscv_pmul_00:
+    return Intrinsic::riscv_pmacc_00;
+  case Intrinsic::riscv_mul_01:
+    return Intrinsic::riscv_macc_01;
+  case Intrinsic::riscv_pmul_01:
+    return Intrinsic::riscv_pmacc_01;
+  case Intrinsic::riscv_mul_11:
+    return Intrinsic::riscv_macc_11;
+  case Intrinsic::riscv_pmul_11:
+    return Intrinsic::riscv_pmacc_11;
+  case Intrinsic::riscv_mulu_00:
+    return Intrinsic::riscv_maccu_00;
+  case Intrinsic::riscv_pmulu_00:
+    return Intrinsic::riscv_pmaccu_00;
+  case Intrinsic::riscv_mulu_01:
+    return Intrinsic::riscv_maccu_01;
+  case Intrinsic::riscv_pmulu_01:
+    return Intrinsic::riscv_pmaccu_01;
+  case Intrinsic::riscv_mulu_11:
+    return Intrinsic::riscv_maccu_11;
+  case Intrinsic::riscv_pmulu_11:
+    return Intrinsic::riscv_pmaccu_11;
+  case Intrinsic::riscv_mulsu_00:
+    return Intrinsic::riscv_maccsu_00;
+  case Intrinsic::riscv_pmulsu_00:
+    return Intrinsic::riscv_pmaccsu_00;
+  case Intrinsic::riscv_mulsu_11:
+    return Intrinsic::riscv_maccsu_11;
+  case Intrinsic::riscv_pmulsu_11:
+    return Intrinsic::riscv_pmaccsu_11;
   }
 }
 
@@ -18221,7 +18250,7 @@ static SDValue combineSelectAndUse(SDNode *N, SDValue Slct, SDValue OtherOp,
 
   if (!Subtarget.hasConditionalMoveFusion()) {
     // (select cond, x, (and x, c)) has custom lowering with Zicond.
-    if (!Subtarget.hasCZEROLike() || N->getOpcode() != ISD::AND)
+    if (!Subtarget.hasStdExtZicond() || N->getOpcode() != ISD::AND)
       return SDValue();
 
     // Maybe harmful when condition code has multiple use.
@@ -18510,6 +18539,30 @@ static SDValue combineAddMulh(SDNode *N, SelectionDAG &DAG,
   return DAG.getNode(RISCVISD::MULHSU, DL, VT, X, Mulh.getOperand(1));
 }
 
+// Fold an add of a multiply-parts product into the accumulating form.
+static SDValue combineAddMulParts(SDNode *N, SelectionDAG &DAG,
+                                  const RISCVSubtarget &Subtarget) {
+  if (!Subtarget.hasStdExtP())
+    return SDValue();
+
+  for (unsigned I = 0; I != 2; ++I) {
+    SDValue Mul = N->getOperand(I);
+    if (Mul.getOpcode() != ISD::INTRINSIC_WO_CHAIN || !Mul.hasOneUse())
+      continue;
+    Intrinsic::ID AccId =
+        getRVPMulPartsAccIntrinsic(Mul.getConstantOperandVal(0));
+    if (AccId == Intrinsic::not_intrinsic)
+      continue;
+
+    SDLoc DL(N);
+    return DAG.getNode(ISD::INTRINSIC_WO_CHAIN, DL, N->getValueType(0),
+                       DAG.getTargetConstant(AccId, DL, Subtarget.getXLenVT()),
+                       N->getOperand(1 - I), Mul.getOperand(1),
+                       Mul.getOperand(2));
+  }
+  return SDValue();
+}
+
 static SDValue combinePExtWideningAddSub(SDNode *N, SelectionDAG &DAG,
                                          const RISCVSubtarget &Subtarget) {
   // Recognize the RV64 decompositions listed for the 32-bit packed widening
@@ -18594,6 +18647,8 @@ static SDValue performADDCombine(SDNode *N,
   if (SDValue V = combinePExtWideningAddSub(N, DAG, Subtarget))
     return V;
   if (SDValue V = combineBinOpOfZExt(N, DAG))
+    return V;
+  if (SDValue V = combineAddMulParts(N, DAG, Subtarget))
     return V;
   if (SDValue V = combineAddMulh(N, DAG, Subtarget))
     return V;
@@ -22571,7 +22626,7 @@ static SDValue useInversedSetcc(SDNode *N, SelectionDAG &DAG,
   // Replace (setcc eq (and x, C)) with (setcc ne (and x, C))) to generate
   // BEXTI, where C is power of 2.
   if (Subtarget.hasBEXTILike() && VT.isScalarInteger() &&
-      (Subtarget.hasCZEROLike() || Subtarget.hasVendorXTHeadCondMov())) {
+      (Subtarget.hasStdExtZicond() || Subtarget.hasVendorXTHeadCondMov())) {
     SDValue LHS = Cond.getOperand(0);
     SDValue RHS = Cond.getOperand(1);
     ISD::CondCode CC = cast<CondCodeSDNode>(Cond.getOperand(2))->get();
@@ -29537,7 +29592,7 @@ RISCVTargetLowering::BuildSDIVPow2(SDNode *N, const APInt &Divisor,
 
 bool RISCVTargetLowering::shouldFoldSelectWithSingleBitTest(
     EVT VT, const APInt &AndMask) const {
-  if (Subtarget.hasCZEROLike() || Subtarget.hasVendorXTHeadCondMov())
+  if (Subtarget.hasStdExtZicond() || Subtarget.hasVendorXTHeadCondMov())
     return !Subtarget.hasBEXTILike() && AndMask.ugt(1024);
   return TargetLowering::shouldFoldSelectWithSingleBitTest(VT, AndMask);
 }
