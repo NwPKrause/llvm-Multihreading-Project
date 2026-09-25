@@ -10,30 +10,32 @@ permissions:
 
 jobs:
   sync:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - name: Checkout local main
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
-
-      - name: Fetch and Merge Upstream
+      - name: Sync Upstream Main
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Add upstream and fetch main
+          # Save this workflow file and any local GitHub workflows into memory before resetting
+          mkdir -p /tmp/github_backup
+          cp -r .github/* /tmp/github_backup/ 2>/dev/null || true
+
+          # Fetch upstream
           git remote add upstream https://github.com/llvm/llvm-project.git || git remote set-url upstream https://github.com/llvm/llvm-project.git
-          git fetch upstream main
+          git fetch upstream main --depth=100
 
-          # Soft merge upstream changes without committing
-          git merge upstream/main --no-commit --no-ff --allow-unrelated-histories || true
+          # Hard reset local main directly onto upstream main (clean fast-forward)
+          git checkout -B main upstream/main
 
-          # Restore local workflows to guarantee your sync file is never modified or deleted
-          git checkout HEAD -- .github/
+          # Restore custom .github workflows on top of clean upstream
+          mkdir -p .github
+          cp -r /tmp/github_backup/* .github/ 2>/dev/null || true
 
-          # Stage, commit, and push
+          # Amend/Combine into a single clean commit or push clean branch state
           git add .github/
-          git commit -m "sync: merge upstream LLVM main preserving workflows" || echo "No new changes to commit"
-          git push origin main
+          if ! git diff-index --quiet HEAD --; then
+            git commit --amend --no-edit || git commit -m "sync: upstream main"
+          fi
+
+          git push origin main --force
